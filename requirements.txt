@@ -1,0 +1,8 @@
+ultralytics
+opencv-python
+streamlit
+streamlit-webrtc
+aiortc
+Flask
+pymongo
+requests
