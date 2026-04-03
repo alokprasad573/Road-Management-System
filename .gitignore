@@ -1,9 +1,69 @@
+# Virtual Environment
 venv/
+.env/
+env/
+ENV/
+
+# Environment variables
 .env
+.env.*
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.dll
+*.py[cod]
+
+# Logs
 *.log
+
+# Database files
 *.sqlite3
+*.db
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Python build
+build/
+dist/
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.temp
+
+# ML Models (large files)
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.h5
+
+# Dataset files
+datasets/
+data/
+
+# Generated images/videos
+static/images/
+outputs/
+runs/
+
+# Ultralytics cache
+Ultralytics/
+runs/
+
+# Node modules (if frontend exists)
+node_modules/
+
+# Coverage reports
+.coverage
+htmlcov/
