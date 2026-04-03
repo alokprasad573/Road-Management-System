@@ -1,185 +1,196 @@
 from __future__ import annotations
 
-import argparse
-import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, List
 
 import cv2
-
-os.environ.setdefault("YOLO_CONFIG_DIR", str(Path(__file__).resolve().parent / "Ultralytics"))
-
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+except ImportError:  # pragma: no cover - optional dependency fallback
+    YOLO = None
 
 from config import Config
 
 
-_model: YOLO | None = None
-_model_name = "unloaded"
+MODEL: YOLO | None = None
+MODEL_NAME = "Unavailable"
+MODEL_ERROR = ""
+COLORS = [(56, 189, 248), (249, 115, 22), (34, 197, 94), (239, 68, 68), (234, 179, 8)]
+
+
+def ensure_output_dir() -> None:
+    """Ensure that the annotated frame output directory exists."""
+    Config.STATIC_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_model_path(raw_path: str | None) -> Path | None:
+    """Resolve a model path from config into an absolute path."""
+    if not raw_path:
+        return None
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = Config.STATIC_IMAGE_DIR.parent.parent / candidate
+    return candidate
 
 
 def load_model() -> YOLO:
-    """Load the primary model, falling back to the secondary model if needed."""
-    global _model, _model_name
+    """Load the primary YOLO model and fall back to the secondary one if needed."""
+    global MODEL, MODEL_NAME, MODEL_ERROR
+    if MODEL is not None:
+        return MODEL
+    if YOLO is None:
+        MODEL_ERROR = "ultralytics is not installed in the active Python environment"
+        raise RuntimeError(MODEL_ERROR)
 
-    if _model is not None:
-        return _model
-
-    for label, path in (
-        ("HighAccurate Model.pt", Config.HIGH_MODEL_PATH),
-        ("LessAccurate Model.pt", Config.LOW_MODEL_PATH),
-    ):
+    candidates = [
+        ("HighAccurate Model.pt", _resolve_model_path(Config.HIGH_MODEL_PATH)),
+        ("LessAccurate Model.pt", _resolve_model_path(Config.LOW_MODEL_PATH)),
+    ]
+    errors: List[str] = []
+    for name, path in candidates:
+        if path is None or not path.exists():
+            errors.append(f"{name} missing at {path}")
+            continue
         try:
-            _model = YOLO(path, task="detect")
-            _model_name = label
-            print(f"[YOLO] Loaded model: {label}")
-            return _model
+            MODEL = YOLO(str(path), task="detect")
+            MODEL_NAME = path.name
+            print(f"[YOLO] Loaded model: {MODEL_NAME}")
+            return MODEL
         except Exception as exc:
-            print(f"[YOLO][WARN] Failed to load {label}: {exc}")
-    raise RuntimeError("No YOLO model could be loaded.")
+            errors.append(f"{name}: {exc}")
+
+    MODEL_ERROR = "; ".join(errors)
+    raise RuntimeError(f"Unable to load any YOLO model. {MODEL_ERROR}")
 
 
-def get_model_status() -> str:
-    """Return the current model status string."""
-    try:
-        load_model()
-    except Exception:
-        return "unloaded"
-    return _model_name
-
-
-def _severity_from_confidence(confidence: float) -> str:
-    """Map detection confidence to a severity label."""
-    if confidence >= 0.85:
+def calculate_severity(confidence: float, label: str = "Pothole") -> str:
+    """Estimate hazard severity from the detection confidence and label."""
+    normalized = label.lower()
+    if "pothole" in normalized and confidence >= 0.8:
         return "High"
-    if confidence >= 0.65:
+    if confidence >= 0.6:
         return "Medium"
     return "Low"
 
 
-def _save_annotated_frame(frame, boxes: Iterable[Dict[str, object]]) -> str:
-    """Draw boxes on a frame and save it to disk."""
-    output = frame.copy()
-    for item in boxes:
-        x1, y1, x2, y2 = item["bbox"]
-        confidence = float(item["confidence"])
-        label = str(item["label"])
-        color = (56, 189, 248)
-        cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(
-            output,
-            f"{label} {confidence:.2f}",
-            (x1, max(25, y1 - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            color,
-            2,
-        )
-
-    Path(Config.STATIC_IMAGE_DIR).mkdir(parents=True, exist_ok=True)
-    filename = f"frame_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-    output_path = str(Path(Config.STATIC_IMAGE_DIR) / filename)
-    cv2.imwrite(output_path, output)
-    return output_path
+def annotate_frame(frame, bbox: List[int], label: str, confidence: float):
+    """Draw a bounding box and label on the frame."""
+    x1, y1, x2, y2 = bbox
+    color = COLORS[0]
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    text = f"{label} {confidence:.2f}"
+    cv2.putText(frame, text, (x1, max(20, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    return frame
 
 
-def detect_frame(frame) -> Dict[str, object]:
-    """Run YOLO detection on a frame and return the best matching result."""
+def save_annotated_frame(frame) -> str:
+    """Save an annotated frame under static/images using a timestamped filename."""
+    ensure_output_dir()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    output_path = Config.STATIC_IMAGE_DIR / f"frame_{timestamp}.jpg"
+    cv2.imwrite(str(output_path), frame)
+    return str(output_path.relative_to(Config.STATIC_IMAGE_DIR.parent.parent)).replace("\\", "/")
+
+
+def detect_frame(frame, confidence_threshold: float | None = None) -> Dict[str, Any]:
+    """Run pothole detection on a single frame and return the requested payload."""
     model = load_model()
+    threshold = confidence_threshold if confidence_threshold is not None else Config.CONFIDENCE_THRESHOLD
     results = model(frame, verbose=False)
     boxes = results[0].boxes
-    candidates: List[Dict[str, object]] = []
-    names = model.names
+    best = None
 
-    for index in range(len(boxes)):
-        confidence = float(boxes[index].conf.item())
-        if confidence < Config.CONFIDENCE_THRESHOLD:
+    for idx in range(len(boxes)):
+        confidence = float(boxes[idx].conf.item())
+        if confidence < threshold:
             continue
-        coords = boxes[index].xyxy.cpu().numpy().squeeze().astype(int).tolist()
-        class_index = int(boxes[index].cls.item())
-        label = str(names[class_index])
-        candidates.append(
-            {
-                "confidence": confidence,
-                "bbox": coords,
-                "label": label,
-                "severity": _severity_from_confidence(confidence),
-            }
-        )
+        xyxy = boxes[idx].xyxy.cpu().numpy().squeeze().astype(int).tolist()
+        class_index = int(boxes[idx].cls.item())
+        label = str(model.names[class_index])
+        candidate = {"confidence": confidence, "bbox": xyxy, "label": label}
+        if best is None or candidate["confidence"] > best["confidence"]:
+            best = candidate
 
-    if not candidates:
-        return {"detected": False, "confidence": 0.0, "bbox": [], "image_path": "", "severity": "Low"}
+    timestamp = datetime.now().isoformat()
+    if best is None:
+        return {
+            "detected": False,
+            "confidence": 0.0,
+            "bbox": [],
+            "image_path": "",
+            "annotated_frame": frame,
+            "timestamp": timestamp,
+            "severity": "Low",
+        }
 
-    best = max(candidates, key=lambda item: item["confidence"])
-    image_path = _save_annotated_frame(frame, candidates)
+    annotated = annotate_frame(frame.copy(), best["bbox"], best["label"], best["confidence"])
+    image_path = save_annotated_frame(annotated)
     return {
         "detected": True,
-        "confidence": best["confidence"],
+        "confidence": round(best["confidence"], 4),
         "bbox": best["bbox"],
         "image_path": image_path,
-        "severity": best["severity"],
+        "annotated_frame": annotated,
+        "timestamp": timestamp,
+        "severity": calculate_severity(best["confidence"], best["label"]),
     }
 
 
-def detect_image_file(image_path: str) -> Dict[str, object]:
-    """Run detection on a single image file."""
-    frame = cv2.imread(image_path)
-    if frame is None:
-        raise FileNotFoundError(f"Unable to read image: {image_path}")
-    result = detect_frame(frame)
-    print(f"[YOLO][IMAGE] {image_path} -> {result}")
+def run_image_test(image_path: str) -> Dict[str, Any]:
+    """Run detection against a test image and print the result."""
+    image = cv2.imread(image_path)
+    if image is None:
+        result = {"detected": False, "error": f"Unable to read image: {image_path}"}
+        print(f"[YOLO][TEST][IMAGE] {result}")
+        return result
+    try:
+        result = detect_frame(image)
+    except Exception as exc:
+        result = {"detected": False, "error": str(exc)}
+    printable = {k: v for k, v in result.items() if k != "annotated_frame"}
+    print(f"[YOLO][TEST][IMAGE] {printable}")
     return result
 
 
-def detect_video_file(video_path: str, max_frames: int | None = 25) -> List[Dict[str, object]]:
-    """Run detection on a video file and print frame-by-frame results."""
+def run_video_test(video_path: str, max_frames: int = 25) -> List[Dict[str, Any]]:
+    """Run frame-by-frame detection on a test video and print the results."""
     capture = cv2.VideoCapture(video_path)
-    if not capture.isOpened():
-        raise FileNotFoundError(f"Unable to open video: {video_path}")
-
-    frame_results: List[Dict[str, object]] = []
+    results: List[Dict[str, Any]] = []
     frame_index = 0
-    while True:
+    while capture.isOpened() and frame_index < max_frames:
         ok, frame = capture.read()
         if not ok or frame is None:
             break
+        try:
+            result = detect_frame(frame)
+        except Exception as exc:
+            result = {"detected": False, "error": str(exc)}
+        printable = {k: v for k, v in result.items() if k != "annotated_frame"}
+        printable["frame"] = frame_index
+        print(f"[YOLO][TEST][VIDEO] {printable}")
+        results.append(printable)
         frame_index += 1
-        result = detect_frame(frame)
-        print(f"[YOLO][VIDEO] frame={frame_index} result={result}")
-        frame_results.append(result)
-        if max_frames is not None and frame_index >= max_frames:
-            break
     capture.release()
-    return frame_results
+    return results
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse detector CLI arguments."""
-    parser = argparse.ArgumentParser(description="RoadWatch AI YOLO detector")
-    parser.add_argument("--source", help="Image or video path to test.")
-    return parser.parse_args()
+def get_model_status() -> Dict[str, Any]:
+    """Return current model load status for health and startup checks."""
+    try:
+        load_model()
+        return {"loaded": True, "model_name": MODEL_NAME, "error": ""}
+    except Exception as exc:
+        return {"loaded": False, "model_name": MODEL_NAME, "error": str(exc)}
 
 
-def main() -> None:
-    """Run detector tests against known assets or a custom source."""
-    args = parse_args()
-    load_model()
-
-    if args.source:
-        path = Path(args.source)
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp"}:
-            detect_image_file(str(path))
-        else:
-            detect_video_file(str(path))
-        return
-
-    if Path(Config.TEST_IMAGE_PATH).exists():
-        detect_image_file(Config.TEST_IMAGE_PATH)
+if __name__ == "__main__":
+    if Config.TEST_IMAGE_PATH.exists():
+        run_image_test(str(Config.TEST_IMAGE_PATH))
     else:
-        print(f"[YOLO][WARN] Test image missing: {Config.TEST_IMAGE_PATH}")
+        print(f"[YOLO][TEST][IMAGE] Missing test image: {Config.TEST_IMAGE_PATH}")
 
-    if Path(Config.TEST_VIDEO_PATH).exists():
-        detect_video_file(Config.TEST_VIDEO_PATH)
+    if Config.TEST_VIDEO_PATH.exists():
+        run_video_test(str(Config.TEST_VIDEO_PATH))
     else:
-        print(f"[YOLO][WARN] Test video missing: {Config.TEST_VIDEO_PATH}")
+        print(f"[YOLO][TEST][VIDEO] Missing test video: {Config.TEST_VIDEO_PATH}")

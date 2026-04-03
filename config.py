@@ -6,60 +6,49 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-ROOT_DIR = Path(__file__).resolve().parent
-load_dotenv(ROOT_DIR / ".env")
-
-
-def _get_required(name: str) -> str:
-    """Return a required environment variable or raise a helpful error."""
-    value = os.getenv(name)
-    if value in (None, ""):
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-def _resolve_path(raw_path: str, *fallbacks: str) -> str:
-    """Resolve a project path, trying fallbacks when the requested file is absent."""
-    candidates = [raw_path, *fallbacks]
-    for candidate in candidates:
-        path = Path(candidate)
-        if not path.is_absolute():
-            path = ROOT_DIR / path
-        if path.exists():
-            return str(path)
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = ROOT_DIR / path
-    return str(path)
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 
 class Config:
-    """Shared application configuration."""
+    """Centralized configuration loaded from the project .env file."""
 
-    MONGO_URI = _get_required("MONGO_URI")
-    MONGO_DB = _get_required("MONGO_DB")
-    MONGO_COLLECTION = _get_required("MONGO_COLLECTION")
-    GOOGLE_MAPS_API_KEY = _get_required("GOOGLE_MAPS_API_KEY")
-    FLASK_SECRET_KEY = _get_required("FLASK_SECRET_KEY")
-    FLASK_PORT = int(_get_required("FLASK_PORT"))
-    CONFIDENCE_THRESHOLD = float(_get_required("CONFIDENCE_THRESHOLD"))
-    DETECTION_INTERVAL = int(_get_required("DETECTION_INTERVAL"))
-    HIGH_MODEL_PATH = _resolve_path(
-        _get_required("HIGH_MODEL_PATH"),
-        "model/HIGH Accurate Model.pt",
-    )
-    LOW_MODEL_PATH = _resolve_path(
-        _get_required("LOW_MODEL_PATH"),
-        "runs/detect/train/weights/best.pt",
-        "yolo11s.pt",
-    )
-    STATIC_IMAGE_DIR = str(ROOT_DIR / "static" / "images")
-    TEST_IMAGE_PATH = str(ROOT_DIR / "Test" / "1.png")
-    TEST_VIDEO_PATH = str(ROOT_DIR / "Test" / "Pothole Exp1.mp4")
-    DB_CONNECTED = False
+    MONGO_URI = os.getenv("MONGO_URI")
+    MONGO_DB = os.getenv("MONGO_DB")
+    MONGO_COLLECTION = os.getenv("MONGO_COLLECTION")
+    GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+    FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY")
+    FLASK_PORT = int(os.getenv("FLASK_PORT", "8050"))
+    HIGH_MODEL_PATH = os.getenv("HIGH_MODEL_PATH")
+    LOW_MODEL_PATH = os.getenv("LOW_MODEL_PATH")
+    CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
+    DETECTION_INTERVAL = int(os.getenv("DETECTION_INTERVAL", "10"))
+    STATIC_IMAGE_DIR = BASE_DIR / "static" / "images"
+    TEST_IMAGE_PATH = BASE_DIR / "Test" / "1.png"
+    TEST_VIDEO_PATH = BASE_DIR / "Test" / "Pothole Exp1.mp4"
+
+    @classmethod
+    def validate(cls) -> None:
+        """Raise a clear error if required environment variables are missing."""
+        required = [
+            "MONGO_URI",
+            "MONGO_DB",
+            "MONGO_COLLECTION",
+            "GOOGLE_MAPS_API_KEY",
+            "FLASK_SECRET_KEY",
+            "HIGH_MODEL_PATH",
+            "LOW_MODEL_PATH",
+        ]
+        missing = [name for name in required if not getattr(cls, name)]
+        if missing:
+            missing_str = ", ".join(missing)
+            raise RuntimeError(f"Missing required environment variables in .env: {missing_str}")
+
+        cls.STATIC_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+Config.validate()
 try:
     print("✅ Config loaded successfully")
 except UnicodeEncodeError:
-    print("[OK] Config loaded successfully")
+    print("Config loaded successfully")

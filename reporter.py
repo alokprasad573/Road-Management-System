@@ -36,10 +36,11 @@ def create_and_save_report(
         "maps_link": get_maps_link(lat, lng),
         "image_path": image_path,
         "severity": severity.title(),
-        "confidence": float(confidence),
+        "confidence": round(confidence, 4),
         "status": "Pending",
         "timestamp": datetime.now().isoformat(),
     }
-    report["_id"] = save_pothole(report)
-    print(f"[REPORT] Pothole saved: {address}")
+    inserted_id = save_pothole(report)
+    report["_id"] = inserted_id
+    print(f"Pothole saved: {address}")
     return report
