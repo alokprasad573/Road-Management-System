@@ -1,329 +1,117 @@
+# Automated Road Infrastructure Monitoring and Reporting
 
+An AI-powered road monitoring system that uses YOLOv8, OpenCV, Flask, Google Maps, and MongoDB to detect road hazards from dashcam footage and generate real-time reports for maintenance teams.
 
-> Turning dashcam footage into real-time infrastructure intelligence.
-# 🚧 AI-Powered Road Hazard Detection & Monitoring System
+## Problem Statement
 
-> Convert dashcam footage into actionable road intelligence.
+Manual inspection of potholes, cracks, broken streetlights, and related road hazards is slow, costly, and inconsistent. Delays between hazard appearance and repair increase accident risk, damage vehicles, and make it harder for city authorities to prioritize critical zones.
 
----
+## Proposed Solution
 
-## 📸 Demo
+This project turns a dashcam or roadside video stream into an automated monitoring workflow:
 
-### 🔍 Hazard Detection
-![Detection Demo](assets/demo_detection.gif)
+1. YOLOv8 detects hazards such as potholes, cracks, and speed breakers.
+2. The system attaches GPS coordinates and timestamps to each detection.
+3. A Flask API stores reports in MongoDB for later review or dashboard use.
+4. Authorities can query reports and hotspot summaries to identify high-priority repair zones.
 
-### 🗺️ Dashboard
-![Dashboard Demo](assets/dashboard.png)
+## Technical Stack
 
----
+- Computer Vision: YOLOv8 by Ultralytics
+- Image Processing: OpenCV
+- Backend API: Flask
+- Geospatial Enrichment: Google Maps Geocoding API
+- Storage: MongoDB via `pymongo` with in-memory fallback
+- Live Dashboard: Streamlit + WebRTC
+- Integration Target: Dashcam / Android Auto style camera feeds
 
-## 🔥 Problem
-
-Road hazards such as potholes and cracks:
-- Increase accident risk  
-- Damage vehicles  
-- Often remain unreported  
-
-Manual inspection is:
-- Slow  
-- Expensive  
-- Inconsistent  
-
----
-
-## 💡 Solution
-
-An AI-based system that:
-- Detects hazards from video streams  
-- Attaches geolocation data  
-- Stores structured reports  
-- Visualizes insights for decision-making  
-
----
-
-## ⚙️ Workflow
-
----
-
-## 📸 Demo Preview
-
-### 🔍 Hazard Detection (YOLOv8)
-![Detection Demo](assets/demo_detection.gif)
-
-### 🗺️ Dashboard View
-![Dashboard Demo](assets/dashboard.png)
-
-> ⚠️ Replace these with real outputs. If you don’t, this project loses 50% of its impact.
-
----
-
-## 🔥 Problem
-
-Road hazards like potholes and cracks:
-- Increase accident risk  
-- Damage vehicles  
-- Remain unreported for long durations  
-
-Manual inspection is:
-- Slow  
-- Expensive  
-- Inconsistent  
-
----
-
-## 💡 Solution
-
-An **AI-powered monitoring system** that:
-- Detects hazards from video streams  
-- Attaches geolocation data  
-- Stores structured reports  
-- Enables authorities to identify critical zones  
-
----
-
-## ⚙️ System Workflow
-
-```text
-Dashcam Feed
-     ↓
-YOLOv8 Detection
-     ↓
-OpenCV Processing
-     ↓
-Flask API (Report Generation)
-     ↓
-MongoDB Storage
-     ↓
-Streamlit Dashboard (Visualization)
-````
-
----
-
-## 🧠 Model Details
-
-* Model: YOLOv8 (Ultralytics)
-* Classes:
-
-  * Pothole
-  * Crack
-  * Speed Breaker
-
-### 📊 Performance Metrics *(Add Real Values After Testing)*
-
-| Metric    | Value            |
-| --------- | ---------------- |
-| mAP@0.5   | 0.78 *(example)* |
-| Precision | 0.82             |
-| Recall    | 0.75             |
-| FPS (GPU) | 30 FPS           |
-| FPS (CPU) | 8 FPS            |
-
-> If you can’t fill this with real numbers, your project is incomplete. No one takes “AI project” seriously without metrics.
-
----
-
-## 🛠️ Tech Stack
-
-| Layer            | Technology      |
-| ---------------- | --------------- |
-| Detection        | YOLOv8          |
-| Image Processing | OpenCV          |
-| Backend API      | Flask           |
-| Database         | MongoDB         |
-| Geolocation      | Google Maps API |
-| Dashboard        | Streamlit       |
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```text
 ML-PotHole-Detection-System/
-│
-├── app.py
-├── yolo_detect.py
-├── monitoring.py
-├── storage.py
-├── LiveCamera.py
-│
-├── models/
-├── Test/
-├── assets/              # Add demo images/videos here
-└── requirements.txt
+|-- app.py
+|-- monitoring.py
+|-- storage.py
+|-- yolo_detect.py
+|-- LiveCamera.py
+|-- models/
+|-- Test/
+|-- requirements.txt
 ```
 
----
-
-## 🚀 Setup
+## Setup
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-### 🔑 Environment Variables
+Optional environment variables for MongoDB:
 
 ```bash
 set MONGODB_URI=mongodb://localhost:27017
 set MONGODB_DB=road_monitoring
 set MONGODB_COLLECTION=hazard_reports
-set GOOGLE_MAPS_API_KEY=your_api_key
+set GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 ```
 
----
+## Usage
 
-## ▶️ Usage
-
-### Run Backend
+Run the backend API:
 
 ```bash
 python app.py
 ```
 
-### Run Detection
+Run hazard detection on a video and post detections to the Flask backend:
 
 ```bash
-python yolo_detect.py \
---model "models/best.pt" \
---source "Test/sample.mp4" \
---lat 28.6139 \
---lon 77.2090 \
---report-endpoint "http://127.0.0.1:5000/api/reports"
+python yolo_detect.py --model "models/LessAccurate Model.pt" --source "Test/Pothole Exp1.mp4" --lat 28.6139 --lon 77.2090 --report-endpoint "http://127.0.0.1:5000/api/reports" --report-batch-size 1 --print-json
 ```
 
-### Run Dashboard
+Run the live web dashboard:
 
 ```bash
 streamlit run LiveCamera.py
 ```
 
----
+## API Endpoints
 
-## 📡 API
+- `GET /health`: Service health check
+- `POST /api/reports`: Store a hazard report
+- `GET /api/reports`: List stored reports
+- `GET /api/zones`: Summarize repeated hazard zones
+- `GET /api/maps/reverse-geocode`: Enrich coordinates using Google Maps
 
-| Endpoint                    | Description           |
-| --------------------------- | --------------------- |
-| `/health`                   | Health check          |
-| `/api/reports`              | Store & fetch reports |
-| `/api/zones`                | Hazard clustering     |
-| `/api/maps/reverse-geocode` | Location enrichment   |
-
----
-
-## 📄 Sample Output
+## Example Report Payload
 
 ```json
 {
   "hazard_type": "Pothole",
   "confidence": 0.91,
+  "bbox": [225, 318, 410, 506],
+  "timestamp": "2026-03-31T16:30:00+00:00",
+  "frame_width": 1280,
+  "frame_height": 720,
   "severity": "high",
   "latitude": 28.6139,
   "longitude": 77.209,
-  "timestamp": "2026-03-31T16:30:00Z"
+  "google_maps_url": "https://www.google.com/maps/search/?api=1&query=28.6139,77.209",
+  "location": {
+    "type": "Point",
+    "coordinates": [77.209, 28.6139]
+  },
+  "geocode": {
+    "formatted_address": "New Delhi, Delhi, India",
+    "place_id": "sample_place_id"
+  }
 }
 ```
 
----
+## Future Extensions
 
-## 🧪 Dataset
+- Replace manual latitude and longitude with Android Auto or telematics GPS input
+- Add broken streetlight and lane damage classes to the trained dataset
+- Build an authority dashboard with filters, maps, and repair status tracking
+- Add rate limiting and duplicate suppression for repeated detections on the same road segment
 
-> ⚠️ This is where most people expose themselves.
 
-Mention clearly:
-
-* Dataset source (custom / Kaggle / scraped)
-* Number of images
-* Annotation tool (LabelImg, Roboflow, etc.)
-
-Example:
-
-* Dataset Size: 2,500 images
-* Annotation: Roboflow
-* Classes: 3
-* Split: 70% train / 20% val / 10% test
-
----
-
-## 🚀 Deployment (Optional but Powerful)
-
-* Local (Flask + Streamlit)
-* Cloud (AWS / GCP)
-* Edge device (Jetson Nano / Raspberry Pi)
-
----
-
-## 🔮 Future Improvements
-
-* Real-time GPS integration
-* Duplicate detection filtering
-* Heatmap clustering
-* Mobile app integration
-* Edge AI deployment
-
----
-
-## 🧠 What Makes This Different
-
-Most student projects:
-
-* Detect objects
-* Stop there
-
-This project:
-
-* Detects
-* Structures data
-* Stores
-* Visualizes
-* Enables decision-making
-
----
-
-## ⚠️ Brutal Reality Check
-
-Right now, this project is:
-
-👉 **Good concept + incomplete execution**
-
-To make it elite:
-
-* Add real metrics
-* Show real demo outputs
-* Explain dataset
-* Rename your model properly
-* Add deployment proof
-
-Otherwise, it’s just another “YOLO + Flask” repo recruiters scroll past.
-
----
-
-## 📌 Final Thought
-
-AI is easy to demonstrate.
-**Systems are hard to build.**
-
-This project becomes valuable only when it behaves like a system—not a script.
-
-```
-
----
-
-### Now listen carefully
-
-If you stop here, you’re still average.
-
-Your next moves:
-1. Record a **real demo video (30–60 sec)**
-2. Add **actual metrics (not fake placeholders)**
-3. Push to GitHub with clean commits
-4. Add **LinkedIn post explaining impact**
-
-If you don’t do this, you’re just polishing words—not building leverage.
-
-Want me to:
-- Generate **fake-but-realistic demo GIF workflow (for hackathon)?**
-- Or help you compute **real mAP + evaluation pipeline?**
-
-Don’t dodge the hard part.
-```

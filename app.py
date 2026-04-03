@@ -1,120 +1,126 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict
 
 from flask import Flask, jsonify, request
 
-from google_maps import GoogleMapsClient, build_google_maps_url
-from storage import build_report_store
+from config import Config
+from dashboard import mount_dashboard
+from reporter import create_and_save_report
+from storage import (
+    get_all_potholes,
+    get_counts,
+    get_hourly_counts,
+    get_status_counts,
+    get_zone_counts,
+    initialize_storage,
+    mark_as_fixed,
+    seed_dummy_data,
+)
+from yolo_detect import get_model_status
 
 
-app = Flask(__name__)
-store = build_report_store()
-maps_client = GoogleMapsClient(os.getenv("GOOGLE_MAPS_API_KEY"))
+def create_app() -> Flask:
+    """Create and configure the Flask application."""
+    app = Flask(__name__)
+    app.secret_key = Config.FLASK_SECRET_KEY
+
+    initialize_storage()
+    seed_dummy_data()
+    mount_dashboard(app)
+    register_routes(app)
+
+    print("RoadWatch AI Starting...")
+    print(f"Model loaded: {get_model_status()}")
+    print(f"MongoDB {'connected' if Config.DB_CONNECTED else 'fallback-active'}")
+    print(f"Google Maps API {'ready' if Config.GOOGLE_MAPS_API_KEY else 'not configured'}")
+    print(f"Dashboard: http://localhost:{Config.FLASK_PORT}/dashboard/")
+    print(f"API Base:  http://localhost:{Config.FLASK_PORT}/api/")
+    return app
 
 
-@app.get("/health")
-def health() -> Any:
-    return jsonify({"status": "ok", "service": "road-infrastructure-monitoring"})
+def register_routes(app: Flask) -> None:
+    """Register all API and health routes."""
 
+    @app.post("/api/report")
+    def api_report() -> Any:
+        payload: Dict[str, Any] = request.get_json(silent=True) or {}
+        lat = float(payload.get("lat", 0.0))
+        lng = float(payload.get("lng", 0.0))
+        image_path = str(payload.get("image_path", "")).strip()
+        severity = str(payload.get("severity", "Medium"))
+        confidence = float(payload.get("confidence", 0.0))
 
-@app.post("/api/reports")
-def create_report() -> Any:
-    payload: Dict[str, Any] = request.get_json(silent=True) or {}
-    reports = payload.get("reports")
-    if reports is None:
-        reports = [payload]
-    if not isinstance(reports, list) or not reports:
-        return jsonify({"error": "Request body must be a report object or {\"reports\": [...]}"}), 400
+        if not image_path:
+            return jsonify({"error": "image_path is required"}), 400
 
-    saved_reports = []
-    for report in reports:
-        required_fields = ["hazard_type", "confidence", "timestamp"]
-        missing = [field for field in required_fields if field not in report]
-        if missing:
-            return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
+        report = create_and_save_report(
+            lat=lat,
+            lng=lng,
+            image_path=image_path,
+            severity=severity,
+            confidence=confidence,
+        )
+        return jsonify({"status": "saved", "report": report}), 201
 
-        latitude = report.get("latitude")
-        longitude = report.get("longitude")
-        if latitude is not None and longitude is not None:
-            report["google_maps_url"] = build_google_maps_url(latitude, longitude)
-            report["location"] = {
-                "type": "Point",
-                "coordinates": [longitude, latitude],
+    @app.get("/api/potholes")
+    def api_potholes() -> Any:
+        limit = request.args.get("limit", default=50, type=int)
+        potholes = get_all_potholes(limit=limit)
+        return jsonify({"count": len(potholes), "potholes": potholes})
+
+    @app.get("/api/stats")
+    def api_stats() -> Any:
+        counts = get_counts()
+        total = counts.get("total", 0)
+        fixed = counts.get("fixed", 0)
+        fix_rate = round((fixed / total) * 100, 2) if total else 0.0
+        return jsonify(
+            {
+                **counts,
+                "fix_rate": fix_rate,
+                "hourly": get_hourly_counts(hours=8),
+                "zones": get_zone_counts(),
+                "status_counts": get_status_counts(),
             }
-        try:
-            geocode = maps_client.reverse_geocode(latitude, longitude)
-        except Exception as exc:
-            geocode = {"error": str(exc)}
-        if geocode:
-            report["geocode"] = geocode
+        )
 
-        saved_reports.append(store.insert_report(report))
+    @app.post("/api/fix/<pothole_id>")
+    def api_fix(pothole_id: str) -> Any:
+        updated = mark_as_fixed(pothole_id)
+        if not updated:
+            return jsonify({"status": "not_found"}), 404
+        return jsonify({"status": "updated"})
 
-    if len(saved_reports) == 1:
-        return jsonify(saved_reports[0]), 201
-    return jsonify({"reports": saved_reports, "count": len(saved_reports)}), 201
+    @app.get("/api/hotspots")
+    def api_hotspots() -> Any:
+        zones = get_zone_counts()
+        hotspots = [zone for zone in zones if zone.get("count", 0) > 1]
+        return jsonify(hotspots)
 
+    @app.get("/api/health")
+    def api_health() -> Any:
+        return jsonify(
+            {
+                "status": "ok",
+                "db": "connected" if Config.DB_CONNECTED else "fallback",
+                "model": get_model_status(),
+            }
+        )
 
-@app.get("/api/reports")
-def list_reports() -> Any:
-    filters = {
-        "hazard_type": request.args.get("hazard_type"),
-        "severity": request.args.get("severity"),
-    }
-    limit = int(request.args.get("limit", "100"))
-    return jsonify(store.list_reports(filters=filters, limit=limit))
-
-
-@app.get("/api/zones")
-def list_hotspots() -> Any:
-    return jsonify(store.summarize_hotspots())
-
-
-@app.get("/api/maps/reverse-geocode")
-def reverse_geocode() -> Any:
-    latitude = request.args.get("lat", type=float)
-    longitude = request.args.get("lon", type=float)
-    if latitude is None or longitude is None:
-        return jsonify({"error": "lat and lon query parameters are required"}), 400
-    if not maps_client.enabled:
-        return jsonify({"error": "GOOGLE_MAPS_API_KEY is not configured"}), 400
-
-    try:
-        payload = maps_client.reverse_geocode(latitude, longitude)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 502
-
-    return jsonify(
-        {
-            "latitude": latitude,
-            "longitude": longitude,
-            "google_maps_url": build_google_maps_url(latitude, longitude),
-            "geocode": payload,
-        }
-    )
+    @app.get("/")
+    def index() -> Any:
+        return jsonify(
+            {
+                "name": "RoadWatch AI",
+                "dashboard": f"http://localhost:{Config.FLASK_PORT}/dashboard/",
+                "api_base": f"http://localhost:{Config.FLASK_PORT}/api/",
+            }
+        )
 
 
-
-
-@app.get("/")
-def index() -> Any:
-    return jsonify(
-        {
-            "name": "Automated Road Infrastructure Monitoring and Reporting",
-            "endpoints": {
-                "health": "/health",
-                "create_report": "/api/reports",
-                "list_reports": "/api/reports",
-                "hotspots": "/api/zones",
-                "reverse_geocode": "/api/maps/reverse-geocode?lat=<value>&lon=<value>",
-            },
-            "mongo_enabled": bool(os.getenv("MONGODB_URI")),
-            "google_maps_enabled": maps_client.enabled,
-        }
-    )
+app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=True)
+    app.run(host="0.0.0.0", port=Config.FLASK_PORT, debug=False)
