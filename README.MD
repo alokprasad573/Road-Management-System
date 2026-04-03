@@ -1,9 +1,47 @@
 
 
-````markdown
+> Turning dashcam footage into real-time infrastructure intelligence.
 # 🚧 AI-Powered Road Hazard Detection & Monitoring System
 
-> Turning dashcam footage into real-time infrastructure intelligence.
+> Convert dashcam footage into actionable road intelligence.
+
+---
+
+## 📸 Demo
+
+### 🔍 Hazard Detection
+![Detection Demo](assets/demo_detection.gif)
+
+### 🗺️ Dashboard
+![Dashboard Demo](assets/dashboard.png)
+
+---
+
+## 🔥 Problem
+
+Road hazards such as potholes and cracks:
+- Increase accident risk  
+- Damage vehicles  
+- Often remain unreported  
+
+Manual inspection is:
+- Slow  
+- Expensive  
+- Inconsistent  
+
+---
+
+## 💡 Solution
+
+An AI-based system that:
+- Detects hazards from video streams  
+- Attaches geolocation data  
+- Stores structured reports  
+- Visualizes insights for decision-making  
+
+---
+
+## ⚙️ Workflow
 
 ---
 
