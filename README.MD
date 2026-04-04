@@ -1,6 +1,6 @@
-# Automated Road Infrastructure Monitoring and Reporting
+# RoadWatch AI - Automated Road Infrastructure Monitoring
 
-An AI-powered road monitoring system that uses YOLOv8, OpenCV, Flask, Google Maps, and MongoDB to detect road hazards from dashcam footage and generate real-time reports for maintenance teams.
+An AI-powered road monitoring system that uses YOLO, OpenCV, Flask, Plotly Dash, Google Maps, and MongoDB to detect road hazards from dashcam footage and generate real-time reports for maintenance teams.
 
 ## Problem Statement
 
@@ -10,108 +10,81 @@ Manual inspection of potholes, cracks, broken streetlights, and related road haz
 
 This project turns a dashcam or roadside video stream into an automated monitoring workflow:
 
-1. YOLOv8 detects hazards such as potholes, cracks, and speed breakers.
-2. The system attaches GPS coordinates and timestamps to each detection.
-3. A Flask API stores reports in MongoDB for later review or dashboard use.
-4. Authorities can query reports and hotspot summaries to identify high-priority repair zones.
+1. **Detection**: YOLO detects hazards such as potholes.
+2. **Geocoding**: The system attaches GPS coordinates and reverse geocodes the location (via Google Maps) to each detection.
+3. **Storage**: A Flask API stores hazard reports in MongoDB (with a local fallback if DB is offline).
+4. **Dashboard**: A live, interactive dashboard built with Plotly Dash displays hotspot summaries, fix rates, and tracks statuses to help authorities prioritize repair zones.
 
 ## Technical Stack
 
-- Computer Vision: YOLOv8 by Ultralytics
-- Image Processing: OpenCV
-- Backend API: Flask
-- Geospatial Enrichment: Google Maps Geocoding API
-- Storage: MongoDB via `pymongo` with in-memory fallback
-- Live Dashboard: Streamlit + WebRTC
-- Integration Target: Dashcam / Android Auto style camera feeds
+- **Computer Vision**: YOLOv8 (via Ultralytics)
+- **Image Processing**: OpenCV
+- **Backend API**: Flask
+- **Live Dashboard**: Plotly Dash
+- **Geospatial Enrichment**: Google Maps Geocoding API
+- **Storage**: MongoDB via `pymongo` with an in-memory local fallback
 
 ## Project Structure
 
 ```text
-ML-PotHole-Detection-System/
-|-- app.py
-|-- monitoring.py
-|-- storage.py
-|-- yolo_detect.py
-|-- LiveCamera.py
-|-- models/
-|-- Test/
-|-- requirements.txt
+Road-Management-System/
+|-- app.py                # Main Flask application and server entrypoint
+|-- dashboard.py          # Plotly Dash interactive frontend mounted on Flask
+|-- config.py             # Environment configuration mapping
+|-- storage.py            # MongoDB/in-memory data operations
+|-- yolo_detect.py        # YOLO model wrapper and detection logic
+|-- LiveCamera.py         # Subprocess script to capture live OpenCV camera feeds
+|-- reporter.py / geotagger.py  # Report assembly and geographic helpers
+|-- requirements.txt      # Python dependencies
+|-- .env                  # Configuration keys (must be created)
+|-- static/               # Auto-generated detected hazard images
 ```
 
 ## Setup
 
+1. **Install dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
 
-Optional environment variables for MongoDB:
-
-```bash
-set MONGODB_URI=mongodb://localhost:27017
-set MONGODB_DB=road_monitoring
-set MONGODB_COLLECTION=hazard_reports
-set GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+2. **Configure your environment**:
+Create a `.env` file in the root directory and add the following keys (customize as necessary):
+```env
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB=road_monitoring
+MONGO_COLLECTION=potholes
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+FLASK_SECRET_KEY=change_me
+FLASK_PORT=8050
+HIGH_MODEL_PATH=models/HighAccurate Model.pt
+LOW_MODEL_PATH=models/LessAccurate Model.pt
+CONFIDENCE_THRESHOLD=0.5
+DETECTION_INTERVAL=10
 ```
 
 ## Usage
 
-Run the backend API:
-
+1. **Start the Application**:
+Run the Flask server, which will initialize the API endpoints and mount the Dash dashboard:
 ```bash
 python app.py
 ```
+After starting, the console will print out the startup status including the loaded YOLO model and database connection state.
 
-Run hazard detection on a video and post detections to the Flask backend:
+2. **View Dashboard**:
+Open a browser and navigate to:
+`http://localhost:8050/dashboard/`
 
-```bash
-python yolo_detect.py --model "models/LessAccurate Model.pt" --source "Test/Pothole Exp1.mp4" --lat 28.6139 --lon 77.2090 --report-endpoint "http://127.0.0.1:5000/api/reports" --report-batch-size 1 --print-json
-```
-
-Run the live web dashboard:
-
-```bash
-streamlit run LiveCamera.py
-```
+3. **Start Camera Feed**:
+To begin live monitoring, either click the "LIVE" button from the dashboard or navigate directly to:
+`http://localhost:8050/camera/start?source=0`
+(Change `source` to a file path like `Test/Pothole Exp1.mp4` for video file testing)
 
 ## API Endpoints
 
-- `GET /health`: Service health check
-- `POST /api/reports`: Store a hazard report
-- `GET /api/reports`: List stored reports
-- `GET /api/zones`: Summarize repeated hazard zones
-- `GET /api/maps/reverse-geocode`: Enrich coordinates using Google Maps
-
-## Example Report Payload
-
-```json
-{
-  "hazard_type": "Pothole",
-  "confidence": 0.91,
-  "bbox": [225, 318, 410, 506],
-  "timestamp": "2026-03-31T16:30:00+00:00",
-  "frame_width": 1280,
-  "frame_height": 720,
-  "severity": "high",
-  "latitude": 28.6139,
-  "longitude": 77.209,
-  "google_maps_url": "https://www.google.com/maps/search/?api=1&query=28.6139,77.209",
-  "location": {
-    "type": "Point",
-    "coordinates": [77.209, 28.6139]
-  },
-  "geocode": {
-    "formatted_address": "New Delhi, Delhi, India",
-    "place_id": "sample_place_id"
-  }
-}
-```
-
-## Future Extensions
-
-- Replace manual latitude and longitude with Android Auto or telematics GPS input
-- Add broken streetlight and lane damage classes to the trained dataset
-- Build an authority dashboard with filters, maps, and repair status tracking
-- Add rate limiting and duplicate suppression for repeated detections on the same road segment
-
-
+- `GET /health` : Service health check (DB routing, model status).
+- `POST /api/report` : Submit a new hazard report (handles lat, lng, image_path, severity, confidence).
+- `GET /api/potholes` : Fetch recent reports (accepts `limit` query param).
+- `GET /api/stats` : Returns detailed stats: total, pending, in progress, fixed, fix rate, and hourly metrics.
+- `GET /api/hotspots` : Lists concentrated areas (hotspots) with hazard recurrences.
+- `POST /api/fix/<pothole_id>` : Mark a specific hazard id as fixed.
