@@ -1,58 +1,48 @@
 # RoadWatch AI - Project Flowchart
 
-This document illustrates the high-level architecture and data flow of the RoadWatch AI monitoring system.
+This document illustrates the high-level architecture and data flow of the RoadWatch AI monitoring system, based on the **SEE IT → TAG IT → DONE** workflow.
 
-## High-Level Architecture (HLA)
+## 🚀 How It Works
 
-The system consists of a Flask-based backend, a Plotly Dash visual dashboard, a YOLO-powered detection engine, and a MongoDB database for persistence.
+The system follows a streamlined 6-step process to transform raw camera data into actionable maintenance intelligence.
 
 ```mermaid
-graph TD
-    subgraph Client ["Frontend Layers (Web Browser)"]
-        DASH["Interactive Dashboard<br/>(Plotly Dash)"]
-        LIVE["Live Camera Interface<br/>(WebRTC + JavaScript)"]
+graph LR
+    subgraph Step1 ["1. SEE IT"]
+        CAM["Camera Captures Road<br/>(Real-time Video)"]
+        DET["YOLOv8 Detects Hazards<br/>(Potholes & Cracks)"]
     end
 
-    subgraph Server ["Backend Application (Flask)"]
-        API["Flask API Layer<br/>(REST Endpoints)"]
-        DET["Detection Engine<br/>(YOLOv11 / OpenCV)"]
-        STOR["Storage Interface<br/>(MongoDB Wrapper)"]
-        UTILS["Utility Modules<br/>(Geotagger, Google Maps)"]
+    subgraph Step2 ["2. TAG IT"]
+        GPS["GPS Tags Location<br/>(Lat / Long)"]
+        API["Data Sent to Server<br/>(Image, Location, Time)"]
     end
 
-    subgraph Data ["Data & Persistence"]
-        DB[(MongoDB)]
-        FS["File System<br/>(Annotated JPEG Records)"]
+    subgraph Step3 ["3. DONE"]
+        DB["Stored in Database<br/>(Secure Persistence)"]
+        DASH["Dashboard View & Action<br/>(Map & Authorities)"]
     end
 
-    subgraph Cloud ["External Integration"]
-        GMAPS["Google Maps API"]
-    end
+    CAM -->|Records Road| DET
+    DET -->|Identifies Hazard| GPS
+    GPS -->|Gets Coordinates| API
+    API -->|Sends via REST| DB
+    DB -->|Actionable Map| DASH
 
-    %% Live Detection Flow
-    LIVE -- "1. Captures Frame (Base64)" --> API
-    API -- "2. Decodes & Processes" --> DET
-    DET -- "3. Returns Bounding Boxes" --> API
-    API -- "4. Returns Detection JSON" --> LIVE
-    LIVE -- "5. Overlays BBox on Camera" --> LIVE
-
-    %% Reporting Flow
-    DET -- "6. Saves Annotated Frame" --> FS
-    API -- "7. Generates Report Record" --> UTILS
-    UTILS -- "8. Performs Geotagging" --> STOR
-    STOR -- "9. Persists Data" --> DB
-
-    %% Dashboard Data Flow
-    DASH -- "10. Queries Statistics" --> API
-    API -- "11. Aggregates Records" --> STOR
-    STOR -- "12. Reads Pothole Data" --> DB
-    DASH -- "13. Displays Map Markers" --> GMAPS
+    style Step1 fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px
+    style Step2 fill:#f0fdf4,stroke:#22c55e,stroke-width:2px
+    style Step3 fill:#fff7ed,stroke:#f97316,stroke-width:2px
 ```
 
-## Data Flow Description
+## 🛠️ Detailed Architectural Steps
 
-1.  **Live Monitoring**: The user visits the `/camera/start` page. The browser requests camera access via WebRTC. JavaScript captures frames every 1.5 seconds and sends them to the Flask `/api/detect_frame` endpoint.
-2.  **Detection**: The backend decodes the image and passes it to the `YoloDetect` module. YOLO identifies potholes or hazards and calculates severity based on confidence.
-3.  **Alerting & Storage**: If a hazard is detected, the frame is annotated with a bounding box and saved to the `static/images` directory. A record (timestamp, severity, confidence, image path) is created and stored in the **MongoDB** database.
-4.  **Visualization**: The **Plotly Dash** dashboard (mounted at `/dashboard/`) fetches aggregated data from the API. It provides real-time statistics (fix rate, hourly trends, severity distribution) and an interactive map showing the location of detected potholes using the **Google Maps API**.
-5.  **Actionable Insights**: Users can view hotspot zones where multiple hazards are clustered and mark potholes as "Fixed," which updates the status in the database.
+1.  **Camera Captures Road**: Dashcam or mobile camera records real-time video of the road infrastructure.
+2.  **YOLOv8 Detects Hazards**: Our custom-trained AI model identifies potholes, cracks, and other hazards in the video frames.
+3.  **GPS Tags Location**: The system automatically captures the exact latitude and longitude of the detected hazard using GPS data (or Geotagger module).
+4.  **Data Sent to Server**: The Hazard image, GPS location, and timestamp are securely sent via the API to the central Flask server.
+5.  **Stored in Database**: All detection data is securely saved in a MongoDB database for future access and audit trails.
+6.  **Dashboard View & Action**: Authorities see the hazards visualized on an interactive map and can take immediate action to prioritize repairs.
+
+---
+
+### **SEE IT → TAG IT → DONE**

@@ -33,58 +33,45 @@
 
 ## 🏗️ High-Level Architecture (HLA)
 
-The system consists of a Flask-based backend, a Plotly Dash visual dashboard, a YOLO-powered detection engine, and a MongoDB database for persistence.
+The system transforms raw dashcam feeds into actionable infrastructure data through a streamlined **SEE IT → TAG IT → DONE** lifecycle.
 
 ```mermaid
-graph TD
-    subgraph Client ["Frontend Layers (Web Browser)"]
-        DASH["Interactive Dashboard<br/>(Plotly Dash)"]
-        LIVE["Live Camera Interface<br/>(WebRTC + JavaScript)"]
+graph LR
+    subgraph S1 ["1. SEE IT"]
+        CAM["Camera Captures Road<br/>(Real-time Video)"]
+        DET["YOLOv8 Detects Hazards<br/>(Potholes & Cracks)"]
     end
 
-    subgraph Server ["Backend Application (Flask)"]
-        API["Flask API Layer<br/>(REST Endpoints)"]
-        DET["Detection Engine<br/>(YOLOv11 / OpenCV)"]
-        STOR["Storage Interface<br/>(MongoDB Wrapper)"]
-        UTILS["Utility Modules<br/>(Geotagger, Google Maps)"]
+    subgraph S2 ["2. TAG IT"]
+        GPS["GPS Tags Location<br/>(Lat / Long)"]
+        API["Data Sent to Server<br/>(Image, Location, Time)"]
     end
 
-    subgraph Data ["Data & Persistence"]
-        DB[(MongoDB)]
-        FS["File System<br/>(Annotated JPEG Records)"]
+    subgraph S3 ["3. DONE"]
+        DB["Stored in Database<br/>(Secure Persistence)"]
+        DASH["Dashboard View & Action<br/>(Map & Authorities)"]
     end
 
-    subgraph Cloud ["External Integration"]
-        GMAPS["Google Maps API"]
-    end
+    CAM -->|Records Road| DET
+    DET -->|Identifies Hazard| GPS
+    GPS -->|Gets Coordinates| API
+    API -->|Sends via REST| DB
+    DB -->|Actionable Map| DASH
 
-    %% Live Detection Flow
-    LIVE -- "1. Captures Frame (Base64)" --> API
-    API -- "2. Decodes & Processes" --> DET
-    DET -- "3. Returns Bounding Boxes" --> API
-    API -- "4. Returns Detection JSON" --> LIVE
-    LIVE -- "5. Overlays BBox on Camera" --> LIVE
-
-    %% Reporting Flow
-    DET -- "6. Saves Annotated Frame" --> FS
-    API -- "7. Generates Report Record" --> UTILS
-    UTILS -- "8. Performs Geotagging" --> STOR
-    STOR -- "9. Persists Data" --> DB
-
-    %% Dashboard Data Flow
-    DASH -- "10. Queries Statistics" --> API
-    API -- "11. Aggregates Records" --> STOR
-    STOR -- "12. Reads Pothole Data" --> DB
-    DASH -- "13. Displays Map Markers" --> GMAPS
+    style S1 fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px
+    style S2 fill:#f0fdf4,stroke:#22c55e,stroke-width:2px
+    style S3 fill:#fff7ed,stroke:#f97316,stroke-width:2px
 ```
 
-### 🔁 Key Data Flow
-1.  **Monitoring**: Real-time camera feed processed via JavaScript and WebRTC.
-2.  **Detection**: YOLOv11 scans frames for pothole hazards and calculates severity.
-3.  **Persistence**: Records and annotated images are stored in MongoDB and the local file system.
-4.  **Analytics**: Authorities use the Plotly Dash interface for hotspot mapping and trend analysis.
+### 🔁 The 6-Step Lifecycle
+1.  **Camera Captures Road**: Dashcam records real-time video of the infrastructure.
+2.  **YOLOv8 Detects Hazards**: AI model identifies potholes, cracks, and other hazards.
+3.  **GPS Tags Location**: The system fetches exact latitude and longitude of the hazard.
+4.  **Data Sent to Server**: Image, location, and time are sent via REST API.
+5.  **Stored in Database**: Data is securely saved for future access and repair planning.
+6.  **Dashboard View & Action**: Authorities see hazards on a map and take action fast.
 
-
+---
 ### 📁 Project Structure
 
 ```text
