@@ -8,19 +8,19 @@
 
 ### 🚀 Technical Highlights
 
-*   **⚡ Real-Time Inference Pipeline**: High-throughput object detection and classification utilizing an optimized YOLOv8 architecture for instantaneous hazard identification.
+*   **⚡ Real-Time Inference Pipeline**: High-throughput object detection and classification utilizing an optimized YOLOv11 architecture for instantaneous hazard identification.
 *   **📍 Geospatial Data Synthesis**: Automated spatio-temporal enrichment using high-precision coordinate mapping and Google Maps Reverse Geocoding.
 *   **📊 Dynamic Telemetry Dashboard**: Interactive BI-ready visualization engine for hotspot density analysis, frequency trending, and cluster mapping.
 *   **🛠️ Reactive Incident Orchestration**: End-to-end automated reporting lifecycle, bridging the gap between detection and municipal resolution.
 
 ---
 
-![How it works](./public/images/how_it_works.jpeg)
+![How it works](./public/images/how_it_works.png)
 
 ## 🛠️ Tech Stack & Tools
 
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
-![YOLOv8](https://img.shields.io/badge/YOLOv8-blue?style=for-the-badge&logo=ultralytics&logoColor=white)
+![YOLOv11](https://img.shields.io/badge/YOLOv11-blue?style=for-the-badge&logo=ultralytics&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/opencv-%23white.svg?style=for-the-badge&logo=opencv&logoColor=white)
 ![Flask](https://img.shields.io/badge/flask-%23000.svg?style=for-the-badge&logo=flask&logoColor=white)
 ![Plotly Dash](https://img.shields.io/badge/Plotly%20Dash-0080FF?style=for-the-badge&logo=Plotly&logoColor=white)
@@ -37,7 +37,7 @@ RoadWatch AI operates on a sophisticated **Asynchronous Computer Vision & Geospa
 graph TD
     subgraph "A. Edge Inference Layer"
         CAM["Live Video Stream<br/>(Dashcam / Mobile)"]
-        YOLO["YOLOv8 Inference Engine<br/>(TensorFlow / PyTorch Implementation)"]
+        YOLO["YOLOv11 Inference Engine<br/>(TensorFlow / PyTorch Implementation)"]
     end
 
     subgraph "B. Geospatial Enrichment Engine"
