@@ -1,68 +1,49 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
-from uuid import uuid4
-
-try:
-    from bson import ObjectId
-except ImportError:  # pragma: no cover - optional dependency fallback
-    ObjectId = None
-
-try:
-    from pymongo import MongoClient
-    from pymongo.collection import Collection
-    from pymongo.errors import PyMongoError
-except ImportError:  # pragma: no cover - optional dependency fallback
-    MongoClient = None
-    Collection = Any
-
-    class PyMongoError(Exception):
-        """Fallback exception used when pymongo is unavailable."""
+from bson import ObjectId
+from pymongo import MongoClient
+from pymongo.collection import Collection
 
 from config import Config
 
 
-_mongo_client: MongoClient | None = None
+_client: MongoClient | None = None
 _collection: Collection | None = None
 _memory_store: List[Dict[str, Any]] = []
+_initialized = False
 
 
-def mongo_available() -> bool:
-    """Return whether MongoDB is reachable."""
-    global _mongo_client
+def initialize_storage() -> Collection | None:
+    """Initialize the singleton MongoDB connection if possible."""
+    global _client, _collection, _initialized
+
+    if _initialized:
+        return _collection
+
+    _initialized = True
     try:
-        if MongoClient is None:
-            return False
-        if _mongo_client is None:
-            _mongo_client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=1500)
-        _mongo_client.admin.command("ping")
-        return True
-    except PyMongoError as exc:
-        print(f"[DB][WARN] MongoDB unavailable, using in-memory fallback: {exc}")
-        return False
-
-
-def get_db_status() -> str:
-    """Return a human-readable database status."""
-    return "connected" if mongo_available() else "fallback"
-
-
-def get_collection() -> Collection:
-    """Return a singleton MongoDB collection handle."""
-    global _mongo_client, _collection
-    if _collection is None and mongo_available():
-        _collection = _mongo_client[Config.MONGO_DB][Config.MONGO_COLLECTION]
+        _client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=1500)
+        _client.admin.command("ping")
+        _collection = _client[Config.MONGO_DB][Config.MONGO_COLLECTION]
         _collection.create_index("timestamp")
         _collection.create_index("status")
         _collection.create_index("zone")
-        _collection.create_index("severity")
-    return _collection
+        Config.DB_CONNECTED = True
+        print("[DB] MongoDB connection ready.")
+        return _collection
+    except Exception as exc:
+        Config.DB_CONNECTED = False
+        print(f"[DB][WARN] MongoDB unavailable, using in-memory fallback. {exc}")
+        _collection = None
+        return None
 
 
-def serialize_document(document: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert Mongo specific values into JSON-safe types."""
+def _normalize_document(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert Mongo-specific values into JSON-friendly types."""
     payload = dict(document)
     if "_id" in payload:
         payload["_id"] = str(payload["_id"])
@@ -71,30 +52,31 @@ def serialize_document(document: Dict[str, Any]) -> Dict[str, Any]:
 
 def save_pothole(report: dict) -> str:
     """Save one pothole report. Return inserted ID as string."""
+    initialize_storage()
     try:
-        collection = get_collection()
-        if collection is None:
-            payload = dict(report)
-            payload["_id"] = str(ObjectId()) if ObjectId is not None else str(uuid4())
-            _memory_store.append(payload)
-            return payload["_id"]
-        result = collection.insert_one(dict(report))
-        return str(result.inserted_id)
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to save pothole: {exc}")
+        payload = dict(report)
+        if _collection is not None:
+            result = _collection.insert_one(payload)
+            return str(result.inserted_id)
+
+        report_id = str(ObjectId())
+        payload["_id"] = report_id
+        _memory_store.append(payload)
+        return report_id
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to save pothole report: {exc}")
         raise
 
 
 def get_all_potholes(limit: int = 50) -> list:
     """Return latest N potholes sorted by timestamp descending."""
+    initialize_storage()
     try:
-        collection = get_collection()
-        if collection is None:
-            items = sorted(_memory_store, key=lambda item: item.get("timestamp", ""), reverse=True)
-            return [serialize_document(item) for item in items[:limit]]
-        cursor = collection.find().sort("timestamp", -1).limit(limit)
-        return [serialize_document(item) for item in cursor]
-    except PyMongoError as exc:
+        if _collection is not None:
+            rows = _collection.find().sort("timestamp", -1).limit(limit)
+            return [_normalize_document(row) for row in rows]
+        return sorted(_memory_store, key=lambda item: item.get("timestamp", ""), reverse=True)[:limit]
+    except Exception as exc:
         print(f"[DB][ERROR] Failed to fetch potholes: {exc}")
         return []
 
@@ -102,200 +84,127 @@ def get_all_potholes(limit: int = 50) -> list:
 def get_counts() -> dict:
     """Return {total, pending, fixed, in_progress, high_severity}."""
     try:
-        collection = get_collection()
-        if collection is None:
-            return {
-                "total": len(_memory_store),
-                "pending": sum(1 for item in _memory_store if item.get("status") == "Pending"),
-                "fixed": sum(1 for item in _memory_store if item.get("status") == "Fixed"),
-                "in_progress": sum(1 for item in _memory_store if item.get("status") == "In Progress"),
-                "high_severity": sum(1 for item in _memory_store if item.get("severity") == "High"),
-            }
+        records = get_all_potholes(limit=10000)
         return {
-            "total": collection.count_documents({}),
-            "pending": collection.count_documents({"status": "Pending"}),
-            "fixed": collection.count_documents({"status": "Fixed"}),
-            "in_progress": collection.count_documents({"status": "In Progress"}),
-            "high_severity": collection.count_documents({"severity": "High"}),
+            "total": len(records),
+            "pending": sum(1 for item in records if item.get("status") == "Pending"),
+            "fixed": sum(1 for item in records if item.get("status") == "Fixed"),
+            "in_progress": sum(1 for item in records if item.get("status") == "In Progress"),
+            "high_severity": sum(1 for item in records if item.get("severity") == "High"),
         }
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to compute counts: {exc}")
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to calculate counts: {exc}")
         return {"total": 0, "pending": 0, "fixed": 0, "in_progress": 0, "high_severity": 0}
 
 
 def get_hourly_counts(hours: int = 8) -> list:
     """Return [{hour: '10:00', count: 5}, ...] for last N hours."""
     try:
-        collection = get_collection()
         now = datetime.now()
-        start = now - timedelta(hours=hours - 1)
-        buckets: List[Dict[str, Any]] = []
-        for hour_offset in range(hours):
-            slot = start + timedelta(hours=hour_offset)
-            next_slot = slot + timedelta(hours=1)
-            if collection is None:
-                count = sum(
-                    1
-                    for item in _memory_store
-                    if slot.isoformat() <= str(item.get("timestamp", "")) < next_slot.isoformat()
-                )
-            else:
-                count = collection.count_documents(
-                    {
-                        "timestamp": {
-                            "$gte": slot.isoformat(),
-                            "$lt": next_slot.isoformat(),
-                        }
-                    }
-                )
-            buckets.append({"hour": slot.strftime("%H:00"), "count": count})
-        return buckets
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to compute hourly counts: {exc}")
+        records = get_all_potholes(limit=10000)
+        output = []
+        for offset in reversed(range(hours)):
+            slot = now - timedelta(hours=offset)
+            label = slot.strftime("%H:00")
+            count = 0
+            for record in records:
+                try:
+                    ts = datetime.fromisoformat(str(record.get("timestamp")))
+                except Exception:
+                    continue
+                if ts.strftime("%Y-%m-%d %H") == slot.strftime("%Y-%m-%d %H"):
+                    count += 1
+            output.append({"hour": label, "count": count})
+        return output
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to calculate hourly counts: {exc}")
         return []
 
 
 def get_zone_counts() -> list:
     """Return [{zone: 'MG Road', count: 12}, ...] sorted by count."""
     try:
-        collection = get_collection()
-        if collection is None:
-            summary: Dict[str, Dict[str, Any]] = {}
-            for item in _memory_store:
-                zone = item.get("zone") or "Unknown Zone"
-                entry = summary.setdefault(zone, {"zone": zone, "count": 0, "fixed": 0})
-                entry["count"] += 1
-                if item.get("status") == "Fixed":
-                    entry["fixed"] += 1
-            zones = list(summary.values())
-            zones.sort(key=lambda item: item["count"], reverse=True)
-            for zone in zones:
-                zone["resolved_percent"] = round((zone["fixed"] / zone["count"]) * 100, 2) if zone["count"] else 0.0
-            return zones
-        pipeline = [
-            {"$group": {"_id": "$zone", "count": {"$sum": 1}, "fixed": {"$sum": {"$cond": [{"$eq": ["$status", "Fixed"]}, 1, 0]}}}},
-            {"$sort": {"count": -1}},
-        ]
-        zones = []
-        for row in collection.aggregate(pipeline):
-            zone_name = row["_id"] or "Unknown Zone"
-            zones.append(
-                {
-                    "zone": zone_name,
-                    "count": row["count"],
-                    "fixed": row.get("fixed", 0),
-                    "resolved_percent": round((row.get("fixed", 0) / row["count"]) * 100, 2) if row["count"] else 0.0,
-                }
-            )
-        return zones
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to compute zone counts: {exc}")
+        counts = Counter(str(record.get("zone", "Unknown Zone")) for record in get_all_potholes(limit=10000))
+        return [{"zone": zone, "count": count} for zone, count in counts.most_common()]
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to calculate zone counts: {exc}")
         return []
 
 
 def get_status_counts() -> dict:
     """Return {Pending: N, Fixed: N, In Progress: N}."""
     try:
-        collection = get_collection()
-        if collection is None:
-            return {
-                "Pending": sum(1 for item in _memory_store if item.get("status") == "Pending"),
-                "Fixed": sum(1 for item in _memory_store if item.get("status") == "Fixed"),
-                "In Progress": sum(1 for item in _memory_store if item.get("status") == "In Progress"),
-            }
+        counts = Counter(str(record.get("status", "Pending")) for record in get_all_potholes(limit=10000))
         return {
-            "Pending": collection.count_documents({"status": "Pending"}),
-            "Fixed": collection.count_documents({"status": "Fixed"}),
-            "In Progress": collection.count_documents({"status": "In Progress"}),
+            "Pending": counts.get("Pending", 0),
+            "Fixed": counts.get("Fixed", 0),
+            "In Progress": counts.get("In Progress", 0),
         }
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to compute status counts: {exc}")
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to calculate status counts: {exc}")
         return {"Pending": 0, "Fixed": 0, "In Progress": 0}
 
 
 def get_severity_counts() -> dict:
     """Return {High: N, Medium: N, Low: N}."""
     try:
-        collection = get_collection()
-        if collection is None:
-            return {
-                "High": sum(1 for item in _memory_store if item.get("severity") == "High"),
-                "Medium": sum(1 for item in _memory_store if item.get("severity") == "Medium"),
-                "Low": sum(1 for item in _memory_store if item.get("severity") == "Low"),
-            }
-        return {
-            "High": collection.count_documents({"severity": "High"}),
-            "Medium": collection.count_documents({"severity": "Medium"}),
-            "Low": collection.count_documents({"severity": "Low"}),
-        }
-    except PyMongoError as exc:
-        print(f"[DB][ERROR] Failed to compute severity counts: {exc}")
+        counts = Counter(str(record.get("severity", "Medium")) for record in get_all_potholes(limit=10000))
+        return {"High": counts.get("High", 0), "Medium": counts.get("Medium", 0), "Low": counts.get("Low", 0)}
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to calculate severity counts: {exc}")
         return {"High": 0, "Medium": 0, "Low": 0}
 
 
 def mark_as_fixed(pothole_id: str) -> bool:
     """Update status to Fixed. Return True if successful."""
+    initialize_storage()
     try:
-        collection = get_collection()
-        if collection is None:
-            for item in _memory_store:
-                if item.get("_id") == pothole_id:
-                    item["status"] = "Fixed"
-                    item["updated_at"] = datetime.now().isoformat()
-                    return True
-            return False
-        if ObjectId is None:
-            return False
-        result = collection.update_one(
-            {"_id": ObjectId(pothole_id)},
-            {"$set": {"status": "Fixed", "updated_at": datetime.now().isoformat()}},
-        )
-        return result.modified_count > 0
-    except (PyMongoError, ValueError) as exc:
-        print(f"[DB][ERROR] Failed to mark pothole fixed: {exc}")
+        if _collection is not None:
+            result = _collection.update_one(
+                {"_id": ObjectId(pothole_id)},
+                {"$set": {"status": "Fixed", "updated_at": datetime.now().isoformat()}},
+            )
+            return result.modified_count > 0
+
+        for record in _memory_store:
+            if str(record.get("_id")) == pothole_id:
+                record["status"] = "Fixed"
+                record["updated_at"] = datetime.now().isoformat()
+                return True
+        return False
+    except Exception as exc:
+        print(f"[DB][ERROR] Failed to mark pothole as fixed: {exc}")
         return False
 
 
 def seed_dummy_data(count: int = 25):
     """If collection is empty, insert dummy pothole records for testing."""
     try:
-        collection = get_collection()
-        if collection is None and _memory_store:
-            return
-        if collection is not None and collection.count_documents({}) > 0:
+        if get_all_potholes(limit=1):
             return
 
-        now = datetime.now()
-        docs = []
-        zones = ["MG Road", "Indiranagar", "Whitefield", "Electronic City", "Koramangala"]
+        base_time = datetime.now()
+        zones = ["MG Road", "Indiranagar", "Jayanagar", "Whitefield", "Koramangala"]
         severities = ["High", "Medium", "Low"]
         statuses = ["Pending", "In Progress", "Fixed"]
-        for idx in range(count):
-            timestamp = (now - timedelta(minutes=idx * 17)).isoformat()
-            zone = zones[idx % len(zones)]
-            severity = severities[idx % len(severities)]
-            status = statuses[idx % len(statuses)]
-            docs.append(
+        for index in range(count):
+            lat = 12.9716 + (index * 0.0001)
+            lng = 77.5946 + (index * 0.0001)
+            save_pothole(
                 {
                     "hazard_type": "Pothole",
-                    "zone": zone,
-                    "address": f"{zone} Main Road, Bengaluru",
-                    "maps_link": f"https://www.google.com/maps/search/?api=1&query=12.97{idx},77.59{idx}",
-                    "image_path": "",
-                    "status": status,
-                    "severity": severity,
-                    "confidence": round(0.55 + (idx % 4) * 0.1, 2),
-                    "timestamp": timestamp,
-                    "lat": 12.9716,
-                    "lng": 77.5946,
+                    "lat": lat,
+                    "lng": lng,
+                    "address": f"{zones[index % len(zones)]} Main Road, Bengaluru",
+                    "zone": zones[index % len(zones)],
+                    "maps_link": f"https://www.google.com/maps/search/?api=1&query={lat},{lng}",
+                    "image_path": "static/images/dummy.jpg",
+                    "severity": severities[index % len(severities)],
+                    "confidence": round(0.55 + ((index % 4) * 0.1), 2),
+                    "status": statuses[index % len(statuses)],
+                    "timestamp": (base_time - timedelta(minutes=index * 15)).isoformat(),
                 }
             )
-        if collection is None:
-            for item in docs:
-                item["_id"] = str(ObjectId()) if ObjectId is not None else str(uuid4())
-                _memory_store.append(item)
-        else:
-            collection.insert_many(docs)
         print(f"[DB] Seeded {count} dummy pothole records.")
-    except PyMongoError as exc:
+    except Exception as exc:
         print(f"[DB][ERROR] Failed to seed dummy data: {exc}")

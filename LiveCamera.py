@@ -2,88 +2,86 @@ from __future__ import annotations
 
 import argparse
 import time
-from typing import Any
 
 import cv2
 
 from config import Config
 from reporter import create_and_save_report
-from yolo_detect import detect_frame, ensure_output_dir
+from yolo_detect import detect_frame
 
 
-DEFAULT_LAT = 12.9716
-DEFAULT_LNG = 77.5946
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Create the CLI argument parser for the camera utility."""
-    parser = argparse.ArgumentParser(description="RoadWatch AI live camera monitor")
-    parser.add_argument("--source", default="0", help="Camera index or path to a video file")
-    return parser
-
-
-def open_source(source: str) -> cv2.VideoCapture:
-    """Open a webcam index or video file source."""
-    try:
-        capture_source: Any = int(source)
-    except ValueError:
-        capture_source = source
-    return cv2.VideoCapture(capture_source)
-
-
-def run_camera(source: str = "0") -> None:
-    """Run live monitoring over webcam or a video file."""
-    ensure_output_dir()
-    capture = open_source(source)
+def run_live_monitor(source: str | int = 0) -> None:
+    """Run live monitoring from a webcam index or video file path."""
+    capture = cv2.VideoCapture(source)
     if not capture.isOpened():
         print(f"[CAMERA][ERROR] Unable to open source: {source}")
         return
 
-    frame_index = 0
+    processed_frames = 0
     detection_count = 0
-    processed_count = 0
-    stats_started = time.time()
+    start_time = time.time()
+    last_stats_time = start_time
 
     while True:
-        success, frame = capture.read()
-        if not success or frame is None:
-            print("[CAMERA] End of stream or unable to read frame.")
+        ok, frame = capture.read()
+        if not ok or frame is None:
+            print("[CAMERA] Stream ended or frame unavailable.")
             break
 
-        annotated_frame = frame.copy()
-        if frame_index % Config.DETECTION_INTERVAL == 0:
-            processed_count += 1
+        processed_frames += 1
+        display_frame = frame.copy()
+
+        if processed_frames % Config.DETECTION_INTERVAL == 0:
             result = detect_frame(frame)
-            annotated_frame = result["annotated_frame"]
             if result["detected"]:
                 detection_count += 1
+                annotated = cv2.imread(result["image_path"])
+                if annotated is not None:
+                    display_frame = annotated
                 report = create_and_save_report(
-                    lat=DEFAULT_LAT,
-                    lng=DEFAULT_LNG,
+                    lat=12.9716,
+                    lng=77.5946,
                     image_path=result["image_path"],
                     severity=result["severity"],
                     confidence=result["confidence"],
                 )
-                print(f"[CAMERA][DETECTION] Saved report {report.get('_id', 'n/a')} at {report['address']}")
+                print(
+                    f"[CAMERA][DETECTED] {report['hazard_type']} at {report['address']} "
+                    f"({report['confidence']:.2f})"
+                )
 
-        cv2.imshow("RoadWatch AI Live Feed", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            print("[CAMERA] Quit requested.")
+        cv2.imshow("RoadWatch AI Live Feed", display_frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord("q"), ord("Q")):
+            print("[CAMERA] Stop requested by user.")
             break
 
-        elapsed = time.time() - stats_started
-        if elapsed >= 30:
+        now = time.time()
+        if now - last_stats_time >= 30:
+            elapsed = max(now - start_time, 1)
+            fps = processed_frames / elapsed
             print(
-                f"[CAMERA][STATS] frames={frame_index + 1} processed={processed_count} detections={detection_count}"
+                f"[CAMERA][STATS] frames={processed_frames} detections={detection_count} "
+                f"avg_fps={fps:.2f}"
             )
-            stats_started = time.time()
-
-        frame_index += 1
+            last_stats_time = now
 
     capture.release()
     cv2.destroyAllWindows()
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the live camera script."""
+    parser = argparse.ArgumentParser(description="RoadWatch AI live camera monitor")
+    parser.add_argument("--source", default="0", help='Webcam index like "0" or video file path.')
+    return parser.parse_args()
+
+
+def normalize_source(raw_source: str) -> str | int:
+    """Convert numeric source strings to webcam indices."""
+    return int(raw_source) if raw_source.isdigit() else raw_source
+
+
 if __name__ == "__main__":
-    args = build_parser().parse_args()
-    run_camera(args.source)
+    args = parse_args()
+    run_live_monitor(normalize_source(args.source))

@@ -10,6 +10,11 @@ except ImportError:  # pragma: no cover
     googlemaps = None
 
 
+def google_maps_ready() -> bool:
+    """Return True when the Google Maps client library and API key are available."""
+    return googlemaps is not None and bool(Config.GOOGLE_MAPS_API_KEY)
+
+
 @lru_cache(maxsize=256)
 def get_address(lat: float, lng: float) -> str:
     """
