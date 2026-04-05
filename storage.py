@@ -4,6 +4,8 @@ from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
+import certifi
+
 from bson import ObjectId
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -26,7 +28,7 @@ def initialize_storage() -> Collection | None:
 
     _initialized = True
     try:
-        _client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=1500)
+        _client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=5000, tlsCAFile=certifi.where())
         _client.admin.command("ping")
         _collection = _client[Config.MONGO_DB][Config.MONGO_COLLECTION]
         _collection.create_index("timestamp")
@@ -36,6 +38,8 @@ def initialize_storage() -> Collection | None:
         print("[DB] MongoDB connection ready.")
         return _collection
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         Config.DB_CONNECTED = False
         print(f"[DB][WARN] MongoDB unavailable, using in-memory fallback. {exc}")
         _collection = None
