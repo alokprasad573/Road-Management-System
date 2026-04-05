@@ -467,8 +467,8 @@ def register_routes(app: Flask) -> None:
 
             if result.get("detected"):
                 report = create_and_save_report(
-                    lat=23.1600,
-                    lng=79.9500,
+                    lat=23.1764863,
+                    lng=80.0245077,
                     image_path=result["image_path"],
                     severity=result.get("severity", "Medium"),
                     confidence=result.get("confidence", 0.0),
